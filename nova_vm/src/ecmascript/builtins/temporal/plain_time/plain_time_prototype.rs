@@ -169,6 +169,19 @@ impl TemporalPlainTimePrototype {
         Ok(value.into())
     }
 
+    /// ### [4.3.10 Temporal.PlainTime.prototype.subtract ( temporalDurationLike )](https://tc39.es/proposal-temporal/#sec-temporal.plaintime.prototype.subtract)
+    pub(crate) fn subtract<'gc>(
+        agent: &mut Agent,
+        this_value: Value,
+        _: ArgumentsList,
+        gc: GcScope<'gc, '_>,
+    ) -> JsResult<'gc, Value<'gc>> {
+        // 1. Let plainTime be the this value.
+        // 2. Perform ? RequireInternalSlot(plainTime, [[InitializedTemporalTime]]).
+        // 3. Return ? AddDurationToTime(subtract, plainTime, temporalDurationLike).
+        todo!()
+    }
+
     pub(crate) fn create_intrinsic(agent: &mut Agent, realm: Realm<'static>, _: NoGcScope) {
         let intrinsics = agent.get_realm_record_by_id(realm).intrinsics();
         let this = intrinsics.temporal_plain_time_prototype();
