@@ -85,7 +85,7 @@ impl Builtin for TemporalPlainTimePrototypeSubtract {
 
 impl TemporalPlainTimePrototype {
     /// ### [4.3.4 get Temporal.PlainTime.prototype.minute](https://tc39.es/proposal-temporal/#sec-get-temporal.plaintime.prototype.minute)
-    pub(crate) fn get_minute<'gc>(
+    fn get_minute<'gc>(
         agent: &mut Agent,
         this_value: Value,
         _: ArgumentsList,
@@ -101,7 +101,7 @@ impl TemporalPlainTimePrototype {
     }
 
     /// ### [4.3.5 get Temporal.PlainTime.prototype.second](https://tc39.es/proposal-temporal/#sec-get-temporal.plaintime.prototype.second)
-    pub(crate) fn get_second<'gc>(
+    fn get_second<'gc>(
         agent: &mut Agent,
         this_value: Value,
         _: ArgumentsList,
@@ -117,7 +117,7 @@ impl TemporalPlainTimePrototype {
     }
 
     /// ### [4.3.6 get Temporal.PlainTime.prototype.millisecond](https://tc39.es/proposal-temporal/#sec-get-temporal.plaintime.prototype.millisecond)
-    pub(crate) fn get_millisecond<'gc>(
+    fn get_millisecond<'gc>(
         agent: &mut Agent,
         this_value: Value,
         _: ArgumentsList,
@@ -133,7 +133,7 @@ impl TemporalPlainTimePrototype {
     }
 
     /// ### [4.3.8 get Temporal.PlainTime.prototype.nanosecond](https://tc39.es/proposal-temporal/#sec-get-temporal.plaintime.prototype.nanosecond)
-    pub(crate) fn get_nanosecond<'gc>(
+    fn get_nanosecond<'gc>(
         agent: &mut Agent,
         this_value: Value,
         _: ArgumentsList,
@@ -149,7 +149,7 @@ impl TemporalPlainTimePrototype {
     }
 
     // ### [4.3.3 get Temporal.PlainTime.prototype.hour](https://tc39.es/proposal-temporal/#sec-get-temporal.plaintime.prototype.hour)
-    pub(crate) fn get_hour<'gc>(
+    fn get_hour<'gc>(
         agent: &mut Agent,
         this_value: Value,
         _: ArgumentsList,
@@ -165,7 +165,7 @@ impl TemporalPlainTimePrototype {
     }
 
     /// ### [4.3.4 get Temporal.PlainTime.prototype.microsecond](https://tc39.es/proposal-temporal/#sec-get-temporal.plaintime.prototype.microsecond)
-    pub(crate) fn get_microsecond<'gc>(
+    fn get_microsecond<'gc>(
         agent: &mut Agent,
         this_value: Value,
         _: ArgumentsList,
