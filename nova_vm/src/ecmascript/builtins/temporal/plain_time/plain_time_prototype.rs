@@ -2,14 +2,17 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use temporal_rs::options::DifferenceSettings;
+
 use crate::{
     ecmascript::{
-        Agent, ArgumentsList, BUILTIN_STRING_MEMORY, Behaviour, Builtin, BuiltinGetter, JsResult,
-        PropertyKey, Realm, String, Value, builders::OrdinaryObjectBuilder,
+        Agent, ArgumentsList, BUILTIN_STRING_MEMORY, Behaviour, Builtin, BuiltinGetter, JsError,
+        JsResult, PropertyKey, Realm, String, Value, builders::OrdinaryObjectBuilder,
         builtins::temporal::plain_time::require_internal_slot_temporal_plain_time,
+        create_temporal_duration, temporal_err_to_js_err, to_temporal_duration,
     },
-    engine::{GcScope, NoGcScope},
-    heap::WellKnownSymbols,
+    engine::{Bindable, GcScope, NoGcScope},
+    heap::{ArenaAccess, WellKnownSymbols},
 };
 
 pub(crate) struct TemporalPlainTimePrototype;
@@ -167,6 +170,37 @@ impl TemporalPlainTimePrototype {
         // 3. Return 𝔽(plainTime.[[Time]].[[Microsecond]]).
         let value = plain_time.inner_plain_time(agent).microsecond();
         Ok(value.into())
+    }
+
+    /// ### [4.3.12 Temporal.PlainTime.prototype.until ( other [ , options ] )](https://tc39.es/proposal-temporal/#sec-temporal.plaintime.prototype.until)
+    pub fn until<'gc>(
+        agent: &mut Agent,
+        this_value: Value,
+        args: ArgumentsList,
+        gc: GcScope<'gc, '_>,
+    ) -> JsResult<'gc, Value<'gc>> {
+        // 1. Let plainTime be the this value.
+        // 2. Perform ? RequireInternalSlot(plainTime, [[InitializedTemporalTime]]).
+        let plain_time =
+            require_internal_slot_temporal_plain_time(agent, this_value, gc.nogc()).unbind()?;
+
+        // 3. Return ? DifferenceTemporalPlainTime(until, plainTime, other, options).
+        let other = args.get(0).bind(gc.nogc());
+        let other = if let Value::PlainTime(other) = other {
+            other.get(agent).plain_time
+        } else {
+            todo!()
+        };
+
+        match plain_time
+            .inner_plain_time(agent)
+            .until(&other, DifferenceSettings::default())
+        {
+            Ok(res) => create_temporal_duration(agent, res, None, gc)
+                .map(Value::from)
+                .unbind(),
+            Err(err) => Err(temporal_err_to_js_err(agent, err, gc.nogc()).unbind()),
+        }
     }
 
     pub(crate) fn create_intrinsic(agent: &mut Agent, realm: Realm<'static>, _: NoGcScope) {
