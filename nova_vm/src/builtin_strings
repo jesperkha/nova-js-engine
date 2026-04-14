@@ -332,6 +332,7 @@ Object
 of
 #[cfg(feature = "atomics")]ok
 #[cfg(feature = "atomics")]or
+#[cfg(feature = "temporal")]overflow
 ownKeys
 padEnd
 padStart

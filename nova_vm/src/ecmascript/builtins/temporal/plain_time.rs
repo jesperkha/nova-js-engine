@@ -9,13 +9,13 @@ mod plain_time_prototype;
 pub(crate) use data::*;
 pub(crate) use plain_time_constructor::*;
 pub(crate) use plain_time_prototype::*;
+use temporal_rs::options::{Overflow, Unit, UnitGroup};
 
 use crate::{
     ecmascript::{
-        Agent, ExceptionType, Function, InternalMethods, InternalSlots, JsResult, OrdinaryObject,
-        ProtoIntrinsics, Value, object_handle, ordinary_populate_from_constructor,
+        Agent, BUILTIN_STRING_MEMORY, DurationRecord, ExceptionType, Function, InternalMethods, InternalSlots, JsResult, Object, OrdinaryObject, ProtoIntrinsics, String, TemporalDuration, Value, get, get_difference_settings, get_options_object, get_temporal_overflow_option, object_handle, ordinary_populate_from_constructor, temporal_err_to_js_err, to_integer_with_truncation
     },
-    engine::{Bindable, GcScope, NoGcScope},
+    engine::{Bindable, GcScope, NoGcScope, Scopable},
     heap::{
         ArenaAccess, ArenaAccessMut, BaseIndex, CompactionLists, CreateHeapData, Heap,
         HeapMarkAndSweep, HeapSweepWeakReference, WorkQueues, arena_vec_access,
@@ -132,4 +132,255 @@ pub(crate) fn create_temporal_plain_time<'gc>(
         )?)
         .unwrap(),
     )
+}
+
+/// ### [4.5.6 ToTemporalTime ( item [ , options ] )](https://tc39.es/proposal-temporal/#sec-temporal-totemporaltime)
+///
+/// The abstract operation ToTemporalTime takes argument item (an ECMAScript language value) and optional argument
+/// options (an ECMAScript language value) and returns either a normal completion containing a Temporal.PlainTime
+/// or a throw Completion. Converts item to a new Temporal.PlainTime instance if possible, and throws otherwise.
+pub(crate) fn to_temporal_time<'gc>(
+    agent: &mut Agent,
+    item: Value,
+    options: Option<Value>,
+    mut gc: GcScope<'gc, '_>,
+) -> JsResult<'gc, temporal_rs::PlainTime> {
+    let item = item.bind(gc.nogc());
+
+    // 1. If options is not present, set options to undefined.
+    let options = options.unwrap_or(Value::Undefined);
+    // 2. If item is an Object, then
+    // a. If item has an [[InitializedTemporalTime]] internal slot, then
+    if let Value::PlainTime(time) = item {
+        // i. Let resolvedOptions be ? GetOptionsObject(options).
+        // let resolved_options = get_options_object(agent, options, gc.nogc()).unbind()?;
+        // ii. Perform ? GetTemporalOverflowOption(resolvedOptions).
+        // get_temporal_overflow_option(agent, resolved_options, gc.reborrow()).unbind()?;
+        // iii. Return ! CreateTemporalTime(item.[[Time]]).
+        return Ok(*time.inner_plain_time(agent));
+    } else if let Value::Object(item) = item {
+        // b. If item has an [[InitializedTemporalDateTime]] internal slot, then
+        // i. Let resolvedOptions be ? GetOptionsObject(options).
+        // ii. Perform ? GetTemporalOverflowOption(resolvedOptions).
+        // iii. Return ! CreateTemporalTime(item.[[ISODateTime]].[[Time]]).
+
+        // c. If item has an [[InitializedTemporalZonedDateTime]] internal slot, then
+        // i. Let isoDateTime be GetISODateTimeFor(item.[[TimeZone]], item.[[EpochNanoseconds]]).
+        // ii. Let resolvedOptions be ? GetOptionsObject(options).
+        // iii. Perform ? GetTemporalOverflowOption(resolvedOptions).
+        // iv. Return ! CreateTemporalTime(isoDateTime.[[Time]]).
+
+        // d. Let result be ? ToTemporalTimeRecord(item).
+        let result = to_temporal_time_record(agent, item.unbind().into(), gc.reborrow())
+            .unbind()?
+            .bind(gc.nogc());
+        // e. Let resolvedOptions be ? GetOptionsObject(options).
+        let resolved_options = get_options_object(agent, options, gc.nogc())
+            .unbind()?;
+        // f. Let overflow be ? GetTemporalOverflowOption(resolvedOptions).
+        let overflow = if let Some(resolved_options) = resolved_options {
+            get_temporal_overflow_option(agent, resolved_options, gc.reborrow())
+                .map_err(|e| e.unbind())?
+        } else {
+            Overflow::Constrain
+        };
+        // g. Set result to ? RegulateTime(result.[[Hour]], result.[[Minute]], result.[[Second]], result.[[Millisecond]], result.[[Microsecond]], result.[[Nanosecond]], overflow).
+        return temporal_rs::PlainTime::from_partial(result, Some(overflow))
+            .map_err(|err| temporal_err_to_js_err(agent, err, gc.into_nogc()));
+    }
+
+    // 3. Else,
+    // a. If item is not a String, throw a TypeError exception.
+    let Ok(item) = String::try_from(item) else {
+        return Err(agent.throw_exception_with_static_message(
+            ExceptionType::TypeError,
+            "item is not a String",
+            gc.into_nogc(),
+        ));
+    };
+
+    // b. Let parseResult be ? ParseISODateTime(item, « TemporalTimeString »).
+    // c. Assert: parseResult.[[Time]] is not start-of-day.
+    // d. Set result to parseResult.[[Time]].
+    // e. NOTE: A successful parse using TemporalTimeString guarantees absence of ambiguity with respect to any ISO 8601 date-only, year-month, or month-day representation.
+    let result = match temporal_rs::PlainTime::from_utf8(item.as_bytes(agent)) {
+        Ok(v) => v,
+        Err(err) => return Err(temporal_err_to_js_err(agent, err, gc.into_nogc())),
+    };
+    // f. Let resolvedOptions be ? GetOptionsObject(options).
+    let resolved_options = get_options_object(agent, options, gc.nogc()).unbind()?;
+    // g. Perform ? GetTemporalOverflowOption(resolvedOptions).
+    if let Some(resolved_options) = resolved_options {
+        get_temporal_overflow_option(agent, resolved_options, gc.reborrow())
+            .map_err(|e| e.unbind())?;
+    }
+
+    // 4. Return ! CreateTemporalTime(result).
+    Ok(result)
+}
+/// ### [4.5.12 ToTemporalTimeRecord ( temporalTimeLike [ , completeness ] )](https://tc39.es/proposal-temporal/#sec-temporal-totemporaltimerecord)
+/// The abstract operation ToTemporalTimeRecord takes argument temporalTimeLike (an Object) and optional argument completeness (either partial or complete) and returns either a normal
+/// completion containing a TemporalTimeLike Record or a throw completion. It converts temporalTimeLike to a TemporalTimeLike Record by reading time component properties, with missing 
+/// components set to 0 if completeness is complete or to unset if partial. It throws a TypeError if temporalTimeLike has no recognized time component properties. It performs the following steps when called:
+fn to_temporal_time_record<'gc>(
+    agent: &mut Agent,
+    item: Object,
+    mut gc: GcScope<'gc, '_>,
+) -> JsResult<'gc, temporal_rs::partial::PartialTime> {
+    let item = item.scope(agent, gc.nogc());
+    // 1. If completeness is not present, set completeness to complete.
+    // 2. If completeness is complete, then
+    //      a. Let result be a new TemporalTimeLike Record with each field set to 0.
+    // 3. Else,
+    //     a. Let result be a new TemporalTimeLike Record with each field set to unset.
+    let mut result = temporal_rs::partial::PartialTime::new();
+    // 4. Let any be false.
+    let mut any = false;
+    // 5. Let hour be ? Get(temporalTimeLike, "hour").
+    let hour = get(agent, item.get(agent), BUILTIN_STRING_MEMORY.hour.to_property_key(), gc.reborrow()).unbind()?.bind(gc.nogc());
+    // 6. If hour is not undefined, then
+    if !hour.is_undefined() {
+        // a. Set result.[[Hour]] to ? ToIntegerWithTruncation(hour).
+        result.hour = Some(u8::try_from(to_integer_with_truncation(agent, hour.unbind(), gc.reborrow()).unbind()?).unwrap_or(u8::MAX));
+        // b. Set any to true.
+        any = true;
+    }
+    // 7. Let microsecond be ? Get(temporalTimeLike, "microsecond").
+    let microsecond = get(agent, item.get(agent), BUILTIN_STRING_MEMORY.microsecond.to_property_key(), gc.reborrow()).unbind()?.bind(gc.nogc());
+    // 8. If microsecond is not undefined, then
+    if !microsecond.is_undefined() {
+        // a. Set result.[[Microsecond]] to ? ToIntegerWithTruncation(microsecond).
+        result.microsecond = Some(u16::try_from(to_integer_with_truncation(agent, microsecond.unbind(), gc.reborrow()).unbind()?).unwrap_or(u16::MAX));
+        // b. Set any to true.
+        any = true;
+    }
+    // 9. Let millisecond be ? Get(temporalTimeLike, "millisecond").
+    let millisecond = get(agent, item.get(agent), BUILTIN_STRING_MEMORY.millisecond.to_property_key(), gc.reborrow()).unbind()?.bind(gc.nogc());
+    // 10. If millisecond is not undefined, then
+    if !millisecond.is_undefined() {
+        // a. Set result.[[Millisecond]] to ? ToIntegerWithTruncation(millisecond).
+        result.millisecond = Some(u16::try_from(to_integer_with_truncation(agent, millisecond.unbind(), gc.reborrow()).unbind()?).unwrap_or(u16::MAX));
+        // b. Set any to true.
+        any = true;
+    }
+    // 11. Let minute be ? Get(temporalTimeLike, "minute").
+    let minute = get(agent, item.get(agent), BUILTIN_STRING_MEMORY.minute.to_property_key(), gc.reborrow()).unbind()?.bind(gc.nogc());
+    // 12. If minute is not undefined, then
+    if !minute.is_undefined() {
+        // a. Set result.[[Minute]] to ? ToIntegerWithTruncation(minute).
+        result.minute = Some(u8::try_from(to_integer_with_truncation(agent, minute.unbind(), gc.reborrow()).unbind()?).unwrap_or(u8::MAX));
+        // b. Set any to true.
+        any = true;
+    }
+    // 13. Let nanosecond be ? Get(temporalTimeLike, "nanosecond").
+    let nanosecond = get(agent, item.get(agent), BUILTIN_STRING_MEMORY.nanosecond.to_property_key(), gc.reborrow()).unbind()?.bind(gc.nogc());
+    // 14. If nanosecond is not undefined, then
+    if !nanosecond.is_undefined() {
+        // a. Set result.[[Nanosecond]] to ? ToIntegerWithTruncation(nanosecond).
+        result.nanosecond = Some(u16::try_from(to_integer_with_truncation(agent, nanosecond.unbind(), gc.reborrow()).unbind()?).unwrap_or(u16::MAX));
+        // b. Set any to true.
+        any = true;
+    }
+    // 15. Let second be ? Get(temporalTimeLike, "second").
+    let second = get(agent, item.get(agent), BUILTIN_STRING_MEMORY.second.to_property_key(), gc.reborrow()).unbind()?.bind(gc.nogc());
+    // 16. If second is not undefined, then
+    if !second.is_undefined() {
+        // a. Set result.[[Second]] to ? ToIntegerWithTruncation(second).
+        result.second = Some(u8::try_from(to_integer_with_truncation(agent, second.unbind(), gc.reborrow()).unbind()?).unwrap_or(u8::MAX));
+        // b. Set any to true.
+        any = true;
+    }
+    // 17. If any is false, throw a TypeError exception.
+    if !any {
+        return Err(agent.throw_exception_with_static_message(
+            ExceptionType::TypeError,
+            "TemporalTimeLike must have at least one time field",
+            gc.into_nogc(),
+        ));
+    }
+    // 18. Return result.
+    Ok(result)
+}
+
+/// ### [4.5.17 DifferenceTemporalPlainTime ( operation, temporalTime, other, options )](https://tc39.es/proposal-temporal/#sec-temporal-differencetemporalplaintime)
+/// The abstract operation DifferenceTemporalPlainTime takes arguments
+/// operation (either since or until), temporalTime (a Temporal.PlainTime),
+/// other (an ECMAScript language value), and options
+/// (an ECMAScript language value) and returns either
+/// a normal completion containing a Temporal.Duration or a
+/// throw completion. It computes the difference between the
+/// two times represented by temporalTime and other, optionally
+/// rounds it, and returns it as a Temporal.Duration object.
+pub(super) fn difference_temporal_plain_time<'gc, const IS_UNTIL: bool>(
+    agent: &mut Agent,
+    plain_time: TemporalPlainTime,
+    other: Value,
+    options: Value,
+    mut gc: GcScope<'gc, '_>,
+) -> JsResult<'gc, TemporalDuration<'gc>> {
+    let plain_time = plain_time.scope(agent, gc.nogc());
+    let other = other.bind(gc.nogc());
+    let options = options.scope(agent, gc.nogc());
+    // 1. Set other to ? ToTemporalTime(other).
+    let other = to_temporal_time(agent, other.unbind(), None, gc.reborrow())
+        .unbind()?;
+    // 2. Let resolvedOptions be ? GetOptionsObject(options).
+    let resolved_option = get_options_object(agent, options.get(agent), gc.nogc())
+        .unbind()?
+        .bind(gc.nogc());
+    // 3. Let settings be ? GetDifferenceSettings(operation, resolvedOptions,
+    // time, « », nanosecond, hour).
+    // 4. Let timeDuration be
+    // DifferenceTime(temporalTime.[[Time]], other.[[Time]]).
+    // 5. Set timeDuration to ! RoundTimeDuration(timeDuration,
+    // settings.[[RoundingIncrement]], settings.[[SmallestUnit]], settings.[[RoundingMode]]).
+    // 6. Let duration be
+    // CombineDateAndTimeDuration(ZeroDateDuration(), timeDuration).
+    // 7. Let result be !
+    // TemporalDurationFromInternal(duration, settings.[[LargestUnit]]).
+    // 8. If operation is since, set result to
+    // CreateNegatedTemporalDuration(result).
+    let duration = if IS_UNTIL {
+        const UNTIL: bool = true;
+        let settings = get_difference_settings::<UNTIL>(
+            agent,
+            resolved_option.unbind(),
+            UnitGroup::Time,
+            &[],
+            Unit::Nanosecond,
+            Unit::Hour,
+            gc.reborrow(),
+        )
+        .unbind()?;
+        temporal_rs::PlainTime::until(
+            plain_time.get(agent).inner_plain_time(agent),
+            &other,
+            settings,
+        )
+    } else {
+        const SINCE: bool = false;
+        let settings = get_difference_settings::<SINCE>(
+            agent,
+            resolved_option.unbind(),
+            UnitGroup::Time,
+            &[],
+            Unit::Nanosecond,
+            Unit::Hour,
+            gc.reborrow(),
+        )
+        .unbind()?;
+        temporal_rs::PlainTime::since(
+            plain_time.get(agent).inner_plain_time(agent),
+            &other,
+            settings,
+        )
+    };
+    let gc = gc.into_nogc();
+    let duration = duration.map_err(|err| temporal_err_to_js_err(agent, err, gc))?;
+
+    // 9. Return result.
+    Ok(agent.heap.create(DurationRecord {
+        object_index: None,
+        duration,
+    }))
 }

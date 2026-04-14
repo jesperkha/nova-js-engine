@@ -4,7 +4,7 @@
 
 use std::str::FromStr;
 
-use temporal_rs::options::{RoundingIncrement, RoundingMode, Unit};
+use temporal_rs::options::{Overflow, RoundingIncrement, RoundingMode, Unit};
 
 use crate::{
     ecmascript::{
@@ -66,6 +66,35 @@ impl StringOptionType for Unit {
             agent.throw_exception(ExceptionType::RangeError, format!("{err}"), gc.into_nogc())
         })
     }
+}
+
+impl StringOptionType for Overflow {
+    fn from_string<'gc>(
+        agent: &mut Agent,
+        value: String,
+        gc: NoGcScope<'gc, '_>,
+    ) -> JsResult<'gc, Self> {
+        let value = value.as_str(agent).unwrap_or("");
+        Self::from_str(value).map_err(|err| {
+            agent.throw_exception(ExceptionType::RangeError, format!("{err}"), gc.into_nogc())
+        })
+    }
+}
+
+/// ### [13.6 GetTemporalOverflowOption (options )](https://tc39.es/proposal-temporal/#sec-temporal-gettemporaloverflowoption)
+///
+/// The abstract operation GetTemporalOverflowOption takes argument options (an Object) and returns either a normal completion containing either constrain or reject, or a throw completion. It fetches and validates the "overflow" property of options, returning a default if absent. It performs the following steps when called:
+
+pub(crate) fn get_temporal_overflow_option<'gc>(
+    agent: &mut Agent,
+    options: Object<'gc>,
+    mut gc: GcScope<'gc, '_>,
+) -> JsResult<'gc, temporal_rs::options::Overflow> {
+    let value = get_option::<Overflow>(agent, options, BUILTIN_STRING_MEMORY.overflow.into(), gc)?;
+    // 1. Let stringValue be ? GetOption(options, "overflow", string, « "constrain", "reject" », "constrain").
+    // 2. If stringValue is "constrain", return constrain.
+    // 3. Return reject.
+    Ok(value.unwrap_or(Overflow::Reject))
 }
 
 /// ### [14.5.2.1 GetOptionsObject ( options )](https://tc39.es/proposal-temporal/#sec-getoptionsobject)

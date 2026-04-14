@@ -24,6 +24,7 @@ impl PlainTimeRecord<'_> {
 }
 
 trivially_bindable!(temporal_rs::PlainTime);
+trivially_bindable!(temporal_rs::partial::PartialTime);
 bindable_handle!(PlainTimeRecord);
 
 impl HeapMarkAndSweep for PlainTimeRecord<'static> {
