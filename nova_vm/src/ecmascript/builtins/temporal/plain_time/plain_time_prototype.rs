@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use temporal_rs::options::ToStringRoundingOptions;
+use temporal_rs::options::{RoundingMode, ToStringRoundingOptions};
 
 use crate::{
     ecmascript::{
@@ -12,9 +12,10 @@ use crate::{
         builtins::temporal::plain_time::{
             add_duration_to_time, require_internal_slot_temporal_plain_time,
         },
-        temporal_err_to_js_err,
+        get_options_object, get_rounding_mode_option, get_temporal_fractional_second_digits_option,
+        get_temporal_unit_valued_option, temporal_err_to_js_err,
     },
-    engine::{Bindable, GcScope, NoGcScope},
+    engine::{Bindable, GcScope, NoGcScope, Scopable},
     heap::WellKnownSymbols,
 };
 
@@ -98,6 +99,13 @@ impl Builtin for TemporalPlainTimePrototypeToJSON {
     const NAME: String<'static> = BUILTIN_STRING_MEMORY.toJSON;
     const LENGTH: u8 = 0;
     const BEHAVIOUR: Behaviour = Behaviour::Regular(TemporalPlainTimePrototype::to_json);
+}
+
+struct TemporalPlainTimePrototypeToString;
+impl Builtin for TemporalPlainTimePrototypeToString {
+    const NAME: String<'static> = BUILTIN_STRING_MEMORY.toString;
+    const LENGTH: u8 = 0;
+    const BEHAVIOUR: Behaviour = Behaviour::Regular(TemporalPlainTimePrototype::to_string);
 }
 
 struct TemporalPlainTimePrototypeValueOf;
@@ -265,6 +273,76 @@ impl TemporalPlainTimePrototype {
         }
     }
 
+    /// ### [4.3.16 Temporal.PlainTime.prototype.toString ( [ options ] )](https://tc39.es/proposal-temporal/#sec-temporal.plaintime.prototype.tostring)
+    fn to_string<'gc>(
+        agent: &mut Agent,
+        this_value: Value,
+        args: ArgumentsList,
+        mut gc: GcScope<'gc, '_>,
+    ) -> JsResult<'gc, Value<'gc>> {
+        let options = args.get(0).bind(gc.nogc());
+        // 1. Let plainTime be the this value.
+        let plain_time = this_value.bind(gc.nogc());
+        // 2. Perform ? RequireInternalSlot(plainTime, [[InitializedTemporalTime]]).
+        let plain_time =
+            require_internal_slot_temporal_plain_time(agent, plain_time.unbind(), gc.nogc())
+                .unbind()?
+                .scope(agent, gc.nogc());
+        // 3. Let resolvedOptions be ? GetOptionsObject(options).
+        let resolved_options = get_options_object(agent, options, gc.nogc())
+            .unbind()?
+            .map(|r| r.scope(agent, gc.nogc()));
+
+        let (digits, rounding_mode, smallest_unit) =
+            if let Some(resolved_options) = resolved_options {
+                // 4. NOTE: The following steps read options and perform independent validation
+                //          in alphabetical order (GetTemporalFractionalSecondDigitsOption reads
+                //          "fractionalSecondDigits" and GetRoundingModeOption reads "roundingMode").
+                // 5. Let digits be ? GetTemporalFractionalSecondDigitsOption(resolvedOptions).
+                let digits = get_temporal_fractional_second_digits_option(
+                    agent,
+                    resolved_options.get(agent),
+                    gc.reborrow(),
+                )
+                .unbind()?;
+                // 6. Let roundingMode be ? GetRoundingModeOption(resolvedOptions, trunc).
+                let rounding_mode = get_rounding_mode_option(
+                    agent,
+                    resolved_options.get(agent),
+                    RoundingMode::Trunc,
+                    gc.reborrow(),
+                )
+                .unbind()?;
+                // 7. Let smallestUnit be ? GetTemporalUnitValuedOption(resolvedOptions, "smallestUnit", unset).
+                let smallest_unit = get_temporal_unit_valued_option(
+                    agent,
+                    resolved_options.get(agent),
+                    BUILTIN_STRING_MEMORY.smallestUnit.to_property_key(),
+                    gc.reborrow(),
+                )
+                .unbind()?;
+                (digits, rounding_mode, smallest_unit)
+            } else {
+                Default::default()
+            };
+
+        // 8. Perform ? ValidateTemporalUnitValue(smallestUnit, time).
+        // 9. If smallestUnit is hour, throw a RangeError exception.
+        // 10. Let precision be ToSecondsStringPrecisionRecord(smallestUnit, digits).
+        // 11. Let roundResult be RoundTime(plainTime.[[Time]], precision.[[Increment]], precision.[[Unit]], roundingMode).
+        let options = ToStringRoundingOptions {
+            precision: digits,
+            smallest_unit,
+            rounding_mode: Some(rounding_mode),
+        };
+        // 12. Return TimeRecordToString(roundResult, precision.[[Precision]]).
+        let plain_time = unsafe { plain_time.take(agent) };
+        match plain_time.inner_plain_time(agent).to_ixdtf_string(options) {
+            Ok(string) => Ok(Value::from_string(agent, string, gc.into_nogc())),
+            Err(err) => Err(temporal_err_to_js_err(agent, err, gc.into_nogc())),
+        }
+    }
+
     /// ### [4.3.19 Temporal.PlainTime.prototype.valueOf](https://tc39.es/proposal-temporal/#sec-temporal.plaintime.prototype.valueof)
     fn value_of<'gc>(
         agent: &mut Agent,
@@ -287,7 +365,7 @@ impl TemporalPlainTimePrototype {
         let plain_time_constructor = intrinsics.temporal_plain_time();
 
         OrdinaryObjectBuilder::new_intrinsic_object(agent, realm, this)
-            .with_property_capacity(12)
+            .with_property_capacity(13)
             .with_prototype(object_prototype)
             .with_constructor_property(plain_time_constructor)
             .with_builtin_function_getter_property::<TemporalPlainTimePrototypeGetHour>()
@@ -299,6 +377,7 @@ impl TemporalPlainTimePrototype {
             .with_builtin_function_property::<TemporalPlainTimePrototypeAdd>()
             .with_builtin_function_property::<TemporalPlainTimePrototypeSubtract>()
             .with_builtin_function_property::<TemporalPlainTimePrototypeToJSON>()
+            .with_builtin_function_property::<TemporalPlainTimePrototypeToString>()
             .with_builtin_function_property::<TemporalPlainTimePrototypeValueOf>()
             .with_property(|builder| {
                 builder
