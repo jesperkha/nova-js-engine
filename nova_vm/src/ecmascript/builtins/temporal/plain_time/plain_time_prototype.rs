@@ -2,17 +2,18 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use temporal_rs::options::{RoundingMode, ToStringRoundingOptions};
+use temporal_rs::options::{RoundingMode, RoundingOptions, ToStringRoundingOptions, Unit};
 
 use crate::{
     ecmascript::{
         Agent, ArgumentsList, BUILTIN_STRING_MEMORY, Behaviour, Builtin, BuiltinGetter,
-        ExceptionType, JsResult, PropertyKey, Realm, String, Value,
+        ExceptionType, JsResult, PropertyKey, Realm, String, StringOptionType, Value,
         builders::OrdinaryObjectBuilder,
         builtins::temporal::plain_time::{
             add_duration_to_time, require_internal_slot_temporal_plain_time,
         },
-        get_options_object, get_rounding_mode_option, get_temporal_fractional_second_digits_option,
+        create_temporal_plain_time, get_options_object, get_rounding_increment_option,
+        get_rounding_mode_option, get_temporal_fractional_second_digits_option,
         get_temporal_unit_valued_option, temporal_err_to_js_err,
     },
     engine::{Bindable, GcScope, NoGcScope, Scopable},
@@ -85,6 +86,13 @@ impl Builtin for TemporalPlainTimePrototypeAdd {
     const NAME: String<'static> = BUILTIN_STRING_MEMORY.add;
     const LENGTH: u8 = 1;
     const BEHAVIOUR: Behaviour = Behaviour::Regular(TemporalPlainTimePrototype::add);
+}
+
+struct TemporalPlainTimePrototypeRound;
+impl Builtin for TemporalPlainTimePrototypeRound {
+    const NAME: String<'static> = BUILTIN_STRING_MEMORY.round;
+    const LENGTH: u8 = 1;
+    const BEHAVIOUR: Behaviour = Behaviour::Regular(TemporalPlainTimePrototype::round);
 }
 
 struct TemporalPlainTimePrototypeSubtract;
@@ -237,6 +245,98 @@ impl TemporalPlainTimePrototype {
         const SUBTRACT: bool = true;
         add_duration_to_time::<SUBTRACT>(agent, plain_time.unbind(), duration.unbind(), gc)
             .map(Value::from)
+    }
+
+    /// ### [5.3.14 Temporal.PlainTime.prototype.round ( roundTo )](https://tc39.es/proposal-temporal/#sec-temporal.plaintime.prototype.round)
+    fn round<'gc>(
+        agent: &mut Agent,
+        this_value: Value,
+        args: ArgumentsList,
+        mut gc: GcScope<'gc, '_>,
+    ) -> JsResult<'gc, Value<'gc>> {
+        let nogc = gc.nogc();
+        let this_value = this_value.bind(nogc);
+        let round_to = args.get(0).bind(nogc);
+        // 1. Let plainTime be the this value.
+        // 2. Perform ? RequireInternalSlot(plainTime, [[InitializedTemporalTime]]).
+        let plain_time = require_internal_slot_temporal_plain_time(agent, this_value, nogc)
+            .unbind()?
+            .bind(nogc);
+        let inner_time = *plain_time.inner_plain_time(agent);
+        // 3. If roundTo is undefined, throw a TypeError exception.
+        if round_to.is_undefined() {
+            return Err(agent.throw_exception_with_static_message(
+                ExceptionType::TypeError,
+                "rountTo cannot be undefined",
+                gc.into_nogc(),
+            ));
+        }
+
+        // 4. If roundTo is a String, then
+        let options = if let Ok(round_to) = String::try_from(round_to) {
+            // a. Let paramString be roundTo.
+            // b. Set roundTo to OrdinaryObjectCreate(null).
+            // c. Perform ! CreateDataPropertyOrThrow(roundTo, "smallestUnit", paramString).
+            let mut options = RoundingOptions::default();
+            options.smallest_unit =
+                Some(Unit::from_string(agent, round_to.unbind(), nogc).unbind()?);
+            options
+        } else {
+            // 5. Else,
+            // a. Set roundTo to ? GetOptionsObject(roundTo).
+            let round_to = get_options_object(agent, round_to, nogc)
+                .unbind()?
+                .map(|r| r.scope(agent, nogc));
+            // 6. NOTE: The following steps read options and perform independent validation in alphabetical
+            // order (GetRoundingIncrementOption reads "roundingIncrement" and GetRoundingModeOption reads "roundingMode").
+            let mut options = RoundingOptions::default();
+
+            let (rounding_increment, rounding_mode, smallest_unit) =
+                if let Some(round_to) = round_to {
+                    // 7. Let roundingIncrement be ? GetRoundingIncrementOption(roundTo).
+                    let rounding_increment =
+                        get_rounding_increment_option(agent, round_to.get(agent), gc.reborrow())
+                            .unbind()?;
+                    // 8. Let roundingMode be ? GetRoundingModeOption(roundTo, half-expand).
+                    let rounding_mode = get_rounding_mode_option(
+                        agent,
+                        round_to.get(agent),
+                        RoundingMode::default(),
+                        gc.reborrow(),
+                    )
+                    .unbind()?;
+                    // 9. Let smallestUnit be ? GetTemporalUnitValuedOption(roundTo, "smallestUnit", required).
+                    let smallest_unit = get_temporal_unit_valued_option(
+                        agent,
+                        round_to.get(agent),
+                        BUILTIN_STRING_MEMORY.smallestUnit.into(),
+                        gc.reborrow(),
+                    )
+                    .unbind()?;
+                    (rounding_increment, rounding_mode, smallest_unit)
+                } else {
+                    Default::default()
+                };
+
+            options.increment = Some(rounding_increment);
+            options.rounding_mode = Some(rounding_mode);
+            options.smallest_unit = smallest_unit;
+            options
+        };
+
+        // 10. Perform ? ValidateTemporalUnitValue(smallestUnit, time).
+        // 11. Let maximum be MaximumTemporalDurationRoundingIncrement(smallestUnit).
+        // 12. Assert: maximum is not unset.
+        // 13. Perform ? ValidateTemporalRoundingIncrement(roundingIncrement, maximum, false).
+        // 14. Let result be RoundTime(plainTime.[[Time]], roundingIncrement, smallestUnit, roundingMode).
+        let result = inner_time
+            .round(options)
+            .map_err(|e| temporal_err_to_js_err(agent, e, gc.nogc()))
+            .unbind()?;
+        // 15. Return ! CreateTemporalTime(result).
+        Ok(create_temporal_plain_time(agent, result, None, gc)
+            .unwrap()
+            .into())
     }
 
     /// ### [4.3.10 Temporal.PlainTime.prototype.subtract ( temporalDurationLike )](https://tc39.es/proposal-temporal/#sec-temporal.plaintime.prototype.subtract)
@@ -395,7 +495,7 @@ impl TemporalPlainTimePrototype {
         let plain_time_constructor = intrinsics.temporal_plain_time();
 
         OrdinaryObjectBuilder::new_intrinsic_object(agent, realm, this)
-            .with_property_capacity(14)
+            .with_property_capacity(15)
             .with_prototype(object_prototype)
             .with_constructor_property(plain_time_constructor)
             .with_builtin_function_getter_property::<TemporalPlainTimePrototypeGetHour>()
@@ -405,6 +505,7 @@ impl TemporalPlainTimePrototype {
             .with_builtin_function_getter_property::<TemporalPlainTimePrototypeGetNanosecond>()
             .with_builtin_function_getter_property::<TemporalPlainTimePrototypeGetMillisecond>()
             .with_builtin_function_property::<TemporalPlainTimePrototypeAdd>()
+            .with_builtin_function_property::<TemporalPlainTimePrototypeRound>()
             .with_builtin_function_property::<TemporalPlainTimePrototypeSubtract>()
             .with_builtin_function_property::<TemporalPlainTimePrototypeToJSON>()
             .with_builtin_function_property::<TemporalPlainTimePrototypeToLocaleString>()
