@@ -256,14 +256,12 @@ impl TemporalPlainTimePrototype {
         // 1. Let plainTime be the this value.
         let value = this_value.bind(gc);
         // 2. Perform ? RequireInternalSlot(plainTime, [[InitializedTemporalTime]]).
-        let instant = require_internal_slot_temporal_plain_time(agent, value.unbind(), gc)
-            .unbind()?
-            .bind(gc);
+        let instant = require_internal_slot_temporal_plain_time(agent, value.unbind(), gc)?;
         // 3. Return TimeRecordToString(plainTime.[[Time]], auto).
         let options: ToStringRoundingOptions = ToStringRoundingOptions::default();
         match instant.inner_plain_time(agent).to_ixdtf_string(options) {
-            Ok(string) => Ok(Value::from_string(agent, string, gc.into_nogc())),
-            Err(err) => Err(temporal_err_to_js_err(agent, err, gc.into_nogc())),
+            Ok(string) => Ok(Value::from_string(agent, string, gc)),
+            Err(err) => Err(temporal_err_to_js_err(agent, err, gc)),
         }
     }
 
