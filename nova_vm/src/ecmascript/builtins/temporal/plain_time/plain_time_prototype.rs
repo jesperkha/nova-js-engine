@@ -101,6 +101,13 @@ impl Builtin for TemporalPlainTimePrototypeToJSON {
     const BEHAVIOUR: Behaviour = Behaviour::Regular(TemporalPlainTimePrototype::to_json);
 }
 
+struct TemporalPlainTimePrototypeToLocaleString;
+impl Builtin for TemporalPlainTimePrototypeToLocaleString {
+    const NAME: String<'static> = BUILTIN_STRING_MEMORY.toLocaleString;
+    const LENGTH: u8 = 0;
+    const BEHAVIOUR: Behaviour = Behaviour::Regular(TemporalPlainTimePrototype::to_locale_string);
+}
+
 struct TemporalPlainTimePrototypeToString;
 impl Builtin for TemporalPlainTimePrototypeToString {
     const NAME: String<'static> = BUILTIN_STRING_MEMORY.toString;
@@ -273,6 +280,29 @@ impl TemporalPlainTimePrototype {
         }
     }
 
+    /// ### [4.3.17 Temporal.PlainTime.prototype.toLocaleString ( [ locales [ , options ] ] )](https://tc39.es/proposal-temporal/#sec-temporal.plaintime.prototype.tolocalestring)
+    /// An ECMAScript implementation that includes the ECMA-402 Internationalization API must implement this method as specified in the ECMA-402 specification. If an ECMAScript
+    /// implementation does not include the ECMA-402 API the following specification of this method is used. The meanings of the optional parameters to this method are defined
+    /// in the ECMA-402 specification; implementations that do not include ECMA-402 support must not use those parameter positions for anything else.
+    fn to_locale_string<'gc>(
+        agent: &mut Agent,
+        this_value: Value,
+        _args: ArgumentsList,
+        gc: GcScope<'gc, '_>,
+    ) -> JsResult<'gc, Value<'gc>> {
+        let gc = gc.into_nogc();
+        // 1. Let plainTime be the this value.
+        let value = this_value.bind(gc);
+        // 2. Perform ? RequireInternalSlot(plainTime, [[InitializedTemporalTime]]).
+        let plain_time = require_internal_slot_temporal_plain_time(agent, value, gc)?;
+        // 3. Return TimeRecordToString(plainTime.[[Time]], auto).
+        let options: ToStringRoundingOptions = ToStringRoundingOptions::default(); // defaults Precision to Auto
+        match plain_time.inner_plain_time(agent).to_ixdtf_string(options) {
+            Ok(string) => Ok(Value::from_string(agent, string, gc)),
+            Err(err) => Err(temporal_err_to_js_err(agent, err, gc)),
+        }
+    }
+
     /// ### [4.3.16 Temporal.PlainTime.prototype.toString ( [ options ] )](https://tc39.es/proposal-temporal/#sec-temporal.plaintime.prototype.tostring)
     fn to_string<'gc>(
         agent: &mut Agent,
@@ -365,7 +395,7 @@ impl TemporalPlainTimePrototype {
         let plain_time_constructor = intrinsics.temporal_plain_time();
 
         OrdinaryObjectBuilder::new_intrinsic_object(agent, realm, this)
-            .with_property_capacity(13)
+            .with_property_capacity(14)
             .with_prototype(object_prototype)
             .with_constructor_property(plain_time_constructor)
             .with_builtin_function_getter_property::<TemporalPlainTimePrototypeGetHour>()
@@ -377,6 +407,7 @@ impl TemporalPlainTimePrototype {
             .with_builtin_function_property::<TemporalPlainTimePrototypeAdd>()
             .with_builtin_function_property::<TemporalPlainTimePrototypeSubtract>()
             .with_builtin_function_property::<TemporalPlainTimePrototypeToJSON>()
+            .with_builtin_function_property::<TemporalPlainTimePrototypeToLocaleString>()
             .with_builtin_function_property::<TemporalPlainTimePrototypeToString>()
             .with_builtin_function_property::<TemporalPlainTimePrototypeValueOf>()
             .with_property(|builder| {
