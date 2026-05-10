@@ -26,7 +26,7 @@ impl BuiltinIntrinsicConstructor for TemporalPlainTimeConstructor {
 }
 
 impl TemporalPlainTimeConstructor {
-    /// ### [4.1.1 Temporal.PlainTime](https://tc39.es/proposal-temporal/#sec-temporal.plaintime)
+    /// ### [4.1.1 Temporal.PlainTime ( [ hour [ , minute [ , second [ , millisecond [ , microsecond [ , nanosecond ] ] ] ] ] ] )](https://tc39.es/proposal-temporal/#sec-temporal.plaintime)
     fn constructor<'gc>(
         agent: &mut Agent,
         _: Value,
@@ -34,12 +34,12 @@ impl TemporalPlainTimeConstructor {
         new_target: Option<Object>,
         mut gc: GcScope<'gc, '_>,
     ) -> JsResult<'gc, Value<'gc>> {
-        let hours = args.get(1).scope(agent, gc.nogc());
-        let minutes = args.get(2).scope(agent, gc.nogc());
-        let seconds = args.get(3).scope(agent, gc.nogc());
-        let milliseconds = args.get(4).scope(agent, gc.nogc());
-        let microseconds = args.get(5).scope(agent, gc.nogc());
-        let nanoseconds = args.get(6).scope(agent, gc.nogc());
+        let hour = args.get(0).scope(agent, gc.nogc());
+        let minute = args.get(1).scope(agent, gc.nogc());
+        let second = args.get(2).scope(agent, gc.nogc());
+        let millisecond = args.get(3).scope(agent, gc.nogc());
+        let microsecond = args.get(4).scope(agent, gc.nogc());
+        let nanosecond = args.get(5).scope(agent, gc.nogc());
 
         let new_target = new_target.bind(gc.nogc());
 
@@ -58,64 +58,63 @@ impl TemporalPlainTimeConstructor {
         let new_target = new_target.scope(agent, gc.nogc());
 
         // 2. If hour is undefined, set hour to 0; else set hour to ? ToIntegerWithTruncation(hour).
-        let hour = if hours.get(agent).is_undefined() {
+        let hour = if hour.get(agent).is_undefined() {
             0
         } else {
             u8::try_from(
-                to_integer_with_truncation(agent, hours.get(agent), gc.reborrow()).unbind()?,
+                to_integer_with_truncation(agent, hour.get(agent), gc.reborrow()).unbind()?,
             )
             .unwrap_or(u8::MAX)
         };
 
         // 3. If minute is undefined, set minute to 0; else set minute to ? ToIntegerWithTruncation(minute).
-        let minute = if minutes.get(agent).is_undefined() {
+        let minute = if minute.get(agent).is_undefined() {
             0
         } else {
             u8::try_from(
-                to_integer_with_truncation(agent, minutes.get(agent), gc.reborrow()).unbind()?,
+                to_integer_with_truncation(agent, minute.get(agent), gc.reborrow()).unbind()?,
             )
             .unwrap_or(u8::MAX)
         };
 
         // 4. If second is undefined, set second to 0; else set second to ? ToIntegerWithTruncation(second).
-        let second = if seconds.get(agent).is_undefined() {
+        let second = if second.get(agent).is_undefined() {
             0
         } else {
             u8::try_from(
-                to_integer_with_truncation(agent, seconds.get(agent), gc.reborrow()).unbind()?,
+                to_integer_with_truncation(agent, second.get(agent), gc.reborrow()).unbind()?,
             )
             .unwrap_or(u8::MAX)
         };
 
         // 5. If millisecond is undefined, set millisecond to 0; else set millisecond to ? ToIntegerWithTruncation(millisecond).
-        let millisecond = if milliseconds.get(agent).is_undefined() {
+        let millisecond = if millisecond.get(agent).is_undefined() {
             0
         } else {
             u16::try_from(
-                to_integer_with_truncation(agent, milliseconds.get(agent), gc.reborrow())
+                to_integer_with_truncation(agent, millisecond.get(agent), gc.reborrow())
                     .unbind()?,
             )
             .unwrap_or(u16::MAX)
         };
 
         // 6. If microsecond is undefined, set microsecond to 0; else set microsecond to ? ToIntegerWithTruncation(microsecond).
-        let microsecond = if microseconds.get(agent).is_undefined() {
+        let microsecond = if microsecond.get(agent).is_undefined() {
             0
         } else {
             u16::try_from(
-                to_integer_with_truncation(agent, microseconds.get(agent), gc.reborrow())
+                to_integer_with_truncation(agent, microsecond.get(agent), gc.reborrow())
                     .unbind()?,
             )
             .unwrap_or(u16::MAX)
         };
 
         // 7. If nanosecond is undefined, set nanosecond to 0; else set nanosecond to ? ToIntegerWithTruncation(nanosecond).
-        let nanosecond = if nanoseconds.get(agent).is_undefined() {
+        let nanosecond = if nanosecond.get(agent).is_undefined() {
             0
         } else {
             u16::try_from(
-                to_integer_with_truncation(agent, nanoseconds.get(agent), gc.reborrow())
-                    .unbind()?,
+                to_integer_with_truncation(agent, nanosecond.get(agent), gc.reborrow()).unbind()?,
             )
             .unwrap_or(u16::MAX)
         };
